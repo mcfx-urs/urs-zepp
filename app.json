@@ -1,0 +1,47 @@
+{
+  "configVersion": "v3",
+  "app": {
+    "appId": 0,
+    "appName": "URS",
+    "appType": "app",
+    "version": {
+      "code": 1,
+      "name": "0.1.0"
+    },
+    "icon": "icon.png",
+    "vender": "mcfx",
+    "description": "Quick actions for URS from your wrist"
+  },
+  "runtime": {
+    "apiVersion": {
+      "compatible": "4.0",
+      "target": "4.0",
+      "minVersion": "4.0"
+    }
+  },
+  "permissions": ["ble"],
+  "targets": {
+    "active-max": {
+      "module": {
+        "page": {
+          "pages": ["page/index"]
+        },
+        "app-side": {
+          "path": "app-side/index"
+        }
+      },
+      "platforms": [
+        {
+          "name": "active-max-wn",
+          "deviceSource": 10813697
+        },
+        {
+          "name": "active-max-w",
+          "deviceSource": 10813699
+        }
+      ],
+      "designWidth": 480
+    }
+  },
+  "defaultLanguage": "en-US"
+}
