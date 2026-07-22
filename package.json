@@ -1,0 +1,17 @@
+{
+  "name": "urs-zepp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zepp OS mini-app for Amazfit watches (Active Max), companion to urs-android",
+  "scripts": {
+    "dev": "zeus dev",
+    "build": "zeus build",
+    "preview": "zeus preview"
+  },
+  "dependencies": {
+    "@zeppos/zml": "^0.0.43"
+  },
+  "devDependencies": {
+    "@zeppos/device-types": "^4.0.0"
+  }
+}
