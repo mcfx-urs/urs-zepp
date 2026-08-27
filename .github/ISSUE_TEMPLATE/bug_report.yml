@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in the watch app isn't working as expected
+labels: ["bug"]
+body:
+  - type: textarea
+    id: area
+    attributes:
+      label: Area
+      description: Which part does this affect — device app, side service, the urs-android relay, the build/deploy flow?
+      placeholder: e.g. page/index.js, app-side/index.js
+    validations:
+      required: true
+  - type: textarea
+    id: current-behavior
+    attributes:
+      label: Current behavior / root cause
+      description: What happens now? If the root cause is already known from the code or logs, describe it here.
+    validations:
+      required: true
+  - type: textarea
+    id: expected-behavior
+    attributes:
+      label: Expected behavior / goal
+      description: What should happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: fix-direction
+    attributes:
+      label: Fix direction (optional)
+      description: If a fix approach is already known but not yet applied, describe it here.
+    validations:
+      required: false

@@ -1,0 +1,32 @@
+name: Change request
+description: A design/policy decision, rename, or restructuring — not a defect, not a new feature
+labels: ["change-request"]
+body:
+  - type: textarea
+    id: area
+    attributes:
+      label: Area
+      description: Which files/conventions would this touch?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What prompted this? What problem does the current state cause?
+    validations:
+      required: true
+  - type: textarea
+    id: options
+    attributes:
+      label: Options considered / decision
+      description: List the options weighed, and which one was picked (or mark as undecided).
+    validations:
+      required: true
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: What does "done" look like for this change?
+    validations:
+      required: true
