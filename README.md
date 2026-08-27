@@ -4,10 +4,12 @@ A [Zepp OS](https://docs.zepp.com/) mini-app for Amazfit watches (built for
 the Amazfit Active Max), companion to [urs-android](https://github.com/3lefeint/urs-android)
 — quick logging actions from the wrist for the URS household-tracking app.
 
-## First feature
+## Features
 
-A single "+1 · 500ml" button that logs a beer to URS without reaching for
-the phone.
+A two-level menu: the top-level `URS` screen lists the available counters,
+and each opens a submenu of logging actions. The first counter, `Beer
+Counter`, logs a beer to URS (`+330ml` / `+500ml`) without reaching for the
+phone.
 
 ## Architecture
 

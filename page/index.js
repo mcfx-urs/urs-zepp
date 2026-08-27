@@ -1,77 +1,60 @@
 import { createWidget, widget, align } from '@zos/ui'
-import { BasePage } from '@zeppos/zml/base-page'
+import { push } from '@zos/router'
 
-// urs-android's local relay listens on loopback only — the
-// Zepp App's side-service does the actual fetch (app-side/index.js), it's
-// on the same phone, so localhost is reachable without going through the
-// backend's WireGuard tunnel at all.
-const RELAY_BASE_URL = 'http://127.0.0.1:8787'
-const BEER_FILL_ENDPOINT = `${RELAY_BASE_URL}/api/watch/beer-fill`
-const DEFAULT_VOLUME_ML = 500
-// Must match WATCH_RELAY_TOKEN in urs-android's WatchRelayToken.kt exactly.
-const RELAY_TOKEN = '33d248e9de3f6cd180d35718ca7d8464145a5dc3368535cc'
+const DEVICE_WIDTH = 480
 
-Page(
-  BasePage({
-    build() {
-      createWidget(widget.TEXT, {
-        x: 0,
-        y: 80,
-        w: 480,
-        h: 80,
-        text: 'urs — Beer',
-        text_size: 36,
-        align_h: align.CENTER_H,
-        align_v: align.CENTER_V,
-      })
+// Top-level menu. Each entry opens its own counter submenu; further
+// counters (and their sub-actions) get appended here as they are built.
+const COUNTERS = [{ name: 'Beer Counter', url: 'page/beer' }]
 
-      this.statusWidget = createWidget(widget.TEXT, {
-        x: 0,
-        y: 160,
-        w: 480,
-        h: 60,
-        text: '',
-        text_size: 24,
-        color: 0x9e9e9e,
-        align_h: align.CENTER_H,
-        align_v: align.CENTER_V,
-      })
+Page({
+  build() {
+    createWidget(widget.TEXT, {
+      x: 0,
+      y: 40,
+      w: DEVICE_WIDTH,
+      h: 60,
+      text: 'URS',
+      text_size: 40,
+      align_h: align.CENTER_H,
+      align_v: align.CENTER_V,
+    })
 
-      createWidget(widget.BUTTON, {
-        x: 90,
-        y: 220,
-        w: 300,
-        h: 120,
-        radius: 20,
-        normal_color: 0xf44336,
-        press_color: 0xb71c1c,
-        text: `+1 · ${DEFAULT_VOLUME_ML}ml`,
-        text_size: 32,
-        click_func: () => this.logFill(),
-      })
-    },
-
-    logFill() {
-      this.statusWidget.text = 'Sending…'
-      this.httpRequest({
-        method: 'POST',
-        url: BEER_FILL_ENDPOINT,
-        headers: { 'x-relay-token': RELAY_TOKEN },
-      })
-        .then((res) => {
-          // zml's httpRequest resolves for any completed HTTP response, not
-          // just 2xx (matches standard fetch() semantics) — status must be
-          // checked explicitly, or a 401/503/500 from the relay silently
-          // shows as success here.
-          if (res && res.status >= 200 && res.status < 300) {
-            this.statusWidget.text = 'Logged ✓'
-          } else {
-            this.statusWidget.text = `Failed (${res && res.status}) — check phone`
-          }
-        })
-        .catch(() => {
-          this.statusWidget.text = 'Failed — check phone'
-        })
-    },
-  }),
-)
+    createWidget(widget.SCROLL_LIST, {
+      x: 0,
+      y: 120,
+      w: DEVICE_WIDTH,
+      h: 360,
+      item_space: 12,
+      item_config: [
+        {
+          type_id: 1,
+          item_height: 100,
+          item_bg_color: 0x1f1f1f,
+          item_bg_radius: 16,
+          text_view: [
+            {
+              x: 40,
+              y: 0,
+              w: DEVICE_WIDTH - 80,
+              h: 100,
+              key: 'name',
+              color: 0xffffff,
+              text_size: 32,
+            },
+          ],
+          text_view_count: 1,
+          image_view_count: 0,
+        },
+      ],
+      item_config_count: 1,
+      data_array: COUNTERS,
+      data_count: COUNTERS.length,
+      data_type_config: [{ start: 0, end: COUNTERS.length - 1, type_id: 1 }],
+      data_type_config_count: 1,
+      item_click_func: (list, index) => {
+        push({ url: COUNTERS[index].url })
+      },
+    })
+  },
+})
