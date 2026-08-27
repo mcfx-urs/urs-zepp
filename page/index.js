@@ -3,9 +3,25 @@ import { push } from '@zos/router'
 
 const DEVICE_WIDTH = 480
 
+// Chore types exposed on the wrist — a fixed short list to start. Each
+// typeId must be a real tracker_type_id from urs-backend for the phone
+// relay to log against; update these to match the account before use.
+const CHORE_TYPES = [
+  { name: 'Bedsheets', typeId: '1' },
+  { name: 'Water plants', typeId: '2' },
+  { name: 'Vacuum', typeId: '3' },
+]
+
 // Top-level menu. Each entry opens its own counter submenu; further
 // counters (and their sub-actions) get appended here as they are built.
-const COUNTERS = [{ name: 'Beer Counter', url: 'page/beer' }]
+const COUNTERS = [
+  { name: 'Beer Counter', url: 'page/beer' },
+  ...CHORE_TYPES.map((type) => ({
+    name: type.name,
+    url: 'page/chore',
+    params: JSON.stringify({ typeId: type.typeId, name: type.name }),
+  })),
+]
 
 Page({
   build() {
@@ -53,7 +69,8 @@ Page({
       data_type_config: [{ start: 0, end: COUNTERS.length - 1, type_id: 1 }],
       data_type_config_count: 1,
       item_click_func: (list, index) => {
-        push({ url: COUNTERS[index].url })
+        const entry = COUNTERS[index]
+        push({ url: entry.url, params: entry.params })
       },
     })
   },
