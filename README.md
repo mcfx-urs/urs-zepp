@@ -84,7 +84,7 @@ The CLI reaches the phone over Zepp's dev server (both must be logged into
 the same account); the phone does the Bluetooth push to the watch. Other
 `bridge$` commands: `screenshot`, `uninstall`.
 
-`release.sh` (in `../urs-releaser/`) has a **urs-zepp** submenu that runs
+`ursctl` (in `../urs-ctl/`) has a **urs-zepp** submenu that runs
 this flow via `expect`, falling back to printing the commands if `expect`
 isn't installed.
 
@@ -131,4 +131,4 @@ SemVer. `master` is the release branch, `testing` is for ongoing work
 3. `zeus build -t "Amazfit Active Max"` as a sanity build.
 4. Commit, fast-forward `testing` → `master`, tag `vX.Y.Z`, push.
 
-`release.sh`'s urs-zepp submenu automates steps 1–4.
+`ursctl`'s urs-zepp submenu automates steps 1–4.
