@@ -1,0 +1,32 @@
+name: Feature request
+description: A new capability the watch app doesn't have yet
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: area
+    attributes:
+      label: Area
+      description: Which part would this touch — device app, side service, the urs-android relay?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: What's the motivation or use case behind this?
+    validations:
+      required: true
+  - type: textarea
+    id: approach
+    attributes:
+      label: Proposed approach / goal
+      description: What should the finished feature do? Include a rough implementation direction if you already have one.
+    validations:
+      required: true
+  - type: textarea
+    id: open-questions
+    attributes:
+      label: Open questions (optional)
+      description: Anything left undecided that needs resolving before implementation.
+    validations:
+      required: false
