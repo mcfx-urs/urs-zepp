@@ -21,6 +21,7 @@ const COUNTERS = [
     url: 'page/chore',
     params: JSON.stringify({ typeId: type.typeId, name: type.name }),
   })),
+  { name: 'Audio note (PoC)', url: 'page/audio-note' },
 ]
 
 Page({
