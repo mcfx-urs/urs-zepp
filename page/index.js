@@ -4,11 +4,14 @@ import { push } from '@zos/router'
 const DEVICE_WIDTH = 480
 
 // Top-level menu. Each entry opens its own submenu; further counters get
-// appended here as they are built.
+// appended here as they are built. The leading emoji stands in for a real
+// icon (GitHub issue #7) — SCROLL_LIST's image_view needs a bundled bitmap
+// per icon, and the system font already renders these glyphs, so no new
+// asset pipeline is needed for a first pass.
 const COUNTERS = [
-  { name: 'Beer Counter', url: 'page/beer' },
-  { name: 'Chores', url: 'page/chores' },
-  { name: 'Audio note (PoC)', url: 'page/audio-note' },
+  { name: '🍺 Beer Counter', url: 'page/beer' },
+  { name: '🧺 Chores', url: 'page/chores' },
+  { name: '🎙️ Audio note (PoC)', url: 'page/audio-note' },
 ]
 
 Page({
