@@ -24,7 +24,7 @@
     "active-max": {
       "module": {
         "page": {
-          "pages": ["page/index", "page/beer", "page/chore", "page/audio-note"]
+          "pages": ["page/index", "page/beer", "page/chores", "page/chore", "page/audio-note"]
         },
         "app-side": {
           "path": "app-side/index"
