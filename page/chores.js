@@ -3,12 +3,13 @@ import { push } from '@zos/router'
 
 const DEVICE_WIDTH = 480
 
-// Top-level menu. Each entry opens its own submenu; further counters get
-// appended here as they are built.
-const COUNTERS = [
-  { name: 'Beer Counter', url: 'page/beer' },
-  { name: 'Chores', url: 'page/chores' },
-  { name: 'Audio note (PoC)', url: 'page/audio-note' },
+// Chore types exposed on the wrist — a fixed short list to start. Each
+// typeId must be a real tracker_type_id from urs-backend for the phone
+// relay to log against; update these to match the account before use.
+const CHORE_TYPES = [
+  { name: 'Bedsheets', typeId: '1' },
+  { name: 'Water plants', typeId: '2' },
+  { name: 'Vacuum', typeId: '3' },
 ]
 
 Page({
@@ -18,7 +19,7 @@ Page({
       y: 40,
       w: DEVICE_WIDTH,
       h: 60,
-      text: 'URS',
+      text: 'Chores',
       text_size: 40,
       align_h: align.CENTER_H,
       align_v: align.CENTER_V,
@@ -52,13 +53,13 @@ Page({
         },
       ],
       item_config_count: 1,
-      data_array: COUNTERS,
-      data_count: COUNTERS.length,
-      data_type_config: [{ start: 0, end: COUNTERS.length - 1, type_id: 1 }],
+      data_array: CHORE_TYPES,
+      data_count: CHORE_TYPES.length,
+      data_type_config: [{ start: 0, end: CHORE_TYPES.length - 1, type_id: 1 }],
       data_type_config_count: 1,
       item_click_func: (list, index) => {
-        const entry = COUNTERS[index]
-        push({ url: entry.url, params: entry.params })
+        const type = CHORE_TYPES[index]
+        push({ url: 'page/chore', params: JSON.stringify({ typeId: type.typeId, name: type.name }) })
       },
     })
   },
