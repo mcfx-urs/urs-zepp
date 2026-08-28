@@ -2,7 +2,7 @@ import { createWidget, widget, align, prop } from '@zos/ui'
 import { create, id, codec } from '@zos/media'
 import { queryPermission, requestPermission } from '@zos/app'
 import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer'
-import { statSync, readFileSync } from '@zos/fs'
+import { statSync, readFileSync, readdirSync, rmSync } from '@zos/fs'
 import TransferFile from '@zos/ble/TransferFile'
 import { BasePage } from '@zeppos/zml/base-page'
 
@@ -13,10 +13,10 @@ const DEVICE_WIDTH = 480
 const MIC_PERMISSION = 'device:os.mic'
 const PERMISSION_GRANTED = 2
 
-// PoC: record a short note with @zos/media and get it to urs-android. The
-// recording is pushed to the phone with @zos/ble file transfer (proves
-// Recorder → BLE → Zepp App), but the delivery that actually persists it
-// is a base64 upload over httpRequest to urs-android's loopback relay —
+// Record a note with @zos/media and get it to urs-android. The recording is
+// also pushed to the phone once with @zos/ble file transfer (proves the
+// Recorder → BLE → Zepp App link), but the delivery that actually persists
+// it is a base64 upload over httpRequest to urs-android's loopback relay —
 // the same relay path the beer action uses — because the Zepp companion
 // service has no API to read a transferred file's bytes.
 const RELAY_BASE_URL = 'http://127.0.0.1:8787'
@@ -24,8 +24,14 @@ const AUDIO_NOTE_ENDPOINT = `${RELAY_BASE_URL}/api/watch/audio-note`
 // Must match WATCH_RELAY_TOKEN in urs-android's WatchRelayToken.kt exactly.
 const RELAY_TOKEN = '33d248e9de3f6cd180d35718ca7d8464145a5dc3368535cc'
 
-// Base64 inflates by ~4/3 and rides zml's BLE messaging — keep PoC notes short.
+// Provisional safety valve, not a recording-length limit: base64 rides zml's
+// BLE messaging and a very large string risks the watch's JS heap. Raise or
+// remove once longer recordings have been tested.
 const MAX_UPLOAD_BYTES = 512 * 1024
+
+// Upload retry: linear backoff, capped, for as long as the screen is open.
+const RETRY_STEP_MS = 5000
+const RETRY_MAX_MS = 60000
 
 const BUTTON_IDLE = { normal_color: 0x1e88e5, press_color: 0x155fa0, text: 'Record' }
 const BUTTON_REC = { normal_color: 0xe53935, press_color: 0xb71c1c, text: 'Stop' }
@@ -36,6 +42,8 @@ const FILE_POLL_MS = 400
 const FILE_POLL_MAX = 15
 // The STOP event is not guaranteed to fire — poll anyway after this long.
 const STOP_FALLBACK_MS = 1500
+
+const NOTE_FILE = /^note-\d+\.opus$/
 
 // The recorder (target_file) and TransferFile (enqueueFile) take a data://
 // URI; @zos/fs takes a path relative to /data. Derive both from one id and
@@ -87,12 +95,20 @@ Page(
       this.stopFallbackTimer = null
       this.stopHandled = false
 
+      // Pending uploads: { rel, uri, size, attempts }. In-memory only — a
+      // note left unsent when the screen closes is picked up again by
+      // scanLeftovers() next time it opens.
+      this.queue = []
+      this.uploading = false
+      this.retryTimer = null
+      this.blePushed = false
+
       createWidget(widget.TEXT, {
         x: 0,
         y: 50,
         w: DEVICE_WIDTH,
         h: 56,
-        text: 'Audio note (PoC)',
+        text: 'Audio note',
         text_size: 32,
         align_h: align.CENTER_H,
         align_v: align.CENTER_V,
@@ -134,6 +150,8 @@ Page(
         text_size: 32,
         click_func: () => this.toggle(),
       })
+
+      this.scanLeftovers()
     },
 
     toggle() {
@@ -242,9 +260,8 @@ Page(
     waitForFile(attempt) {
       const size = fileSize(this.paths.rel)
       if (size > 0) {
-        // Upload first and alone — a concurrent BLE file transfer starves
-        // the zml messaging handshake ("shake timeout").
-        this.uploadToRelay(size)
+        this.enqueue({ rel: this.paths.rel, uri: this.paths.uri, size, fresh: true })
+        this.pumpQueue()
         return
       }
       if (attempt >= FILE_POLL_MAX) {
@@ -254,23 +271,71 @@ Page(
       setTimeout(() => this.waitForFile(attempt + 1), FILE_POLL_MS)
     },
 
-    // Read the .opus back, base64 it, POST over httpRequest — zml relays it
-    // to the companion service, which fetch()es the loopback relay.
-    uploadToRelay(size) {
-      if (size > MAX_UPLOAD_BYTES) {
-        this.setStatus(`Too large to upload (${size}B)`)
+    // Re-enqueue any note file left on disk from a previous session that
+    // never uploaded (screen closed, crash, relay unreachable).
+    scanLeftovers() {
+      try {
+        const names = readdirSync({ path: '.' }) || []
+        names
+          .filter((n) => NOTE_FILE.test(n))
+          .forEach((rel) => {
+            const size = fileSize(rel)
+            if (size > 0) {
+              this.enqueue({ rel, uri: `data://${rel}`, size, fresh: false })
+            }
+          })
+      } catch (e) {
+        // no leftovers is the normal case
+      }
+      if (this.queue.length) {
+        this.setStatus(`${this.queue.length} note(s) pending`)
+        this.pumpQueue()
+      }
+    },
+
+    enqueue(entry) {
+      if (this.queue.some((e) => e.rel === entry.rel)) {
         return
       }
-      let b64
-      try {
-        const buf = readFileSync({ path: this.paths.rel })
-        b64 = base64FromBytes(new Uint8Array(buf))
-      } catch (e) {
-        this.setStatus(`Read failed: ${(e && e.message) || e}`)
+      entry.attempts = 0
+      this.queue.push(entry)
+    },
+
+    dropEntry(entry) {
+      this.queue = this.queue.filter((e) => e.rel !== entry.rel)
+    },
+
+    pending() {
+      return this.queue.length ? ` (${this.queue.length} pending)` : ''
+    },
+
+    // One upload at a time; a concurrent BLE file transfer starves the zml
+    // messaging handshake ("shake timeout"), so the BLE push waits too.
+    pumpQueue() {
+      if (this.uploading || this.queue.length === 0) {
+        return
+      }
+      const entry = this.queue[0]
+
+      if (entry.size > MAX_UPLOAD_BYTES) {
+        this.dropEntry(entry)
+        this.setStatus(`Note too long to upload — kept on watch${this.pending()}`)
+        this.pumpQueue()
         return
       }
 
-      this.setStatus(`Uploading ${size}B…`)
+      let b64
+      try {
+        b64 = base64FromBytes(new Uint8Array(readFileSync({ path: entry.rel })))
+      } catch (e) {
+        // File vanished — nothing to send.
+        this.dropEntry(entry)
+        this.pumpQueue()
+        return
+      }
+
+      this.uploading = true
+      this.setStatus(`Uploading ${entry.size}B…${this.pending()}`)
       this.httpRequest({
         method: 'POST',
         url: AUDIO_NOTE_ENDPOINT,
@@ -282,29 +347,51 @@ Page(
         body: b64,
       })
         .then((res) => {
+          this.uploading = false
           // httpRequest resolves for any completed response, not just 2xx.
           if (res && res.status >= 200 && res.status < 300) {
-            this.setStatus(`Uploaded ✓ (${size}B)`)
+            this.onUploaded(entry)
           } else {
-            this.setStatus(`Upload failed (${res && res.status})`)
+            this.onUploadFailed(entry, `status ${res && res.status}`)
           }
         })
         .catch((e) => {
-          this.setStatus(`Upload failed: ${(e && e.message) || e}`)
+          this.uploading = false
+          this.onUploadFailed(entry, (e && e.message) || `${e}`)
         })
-        .then(() => {
-          // Link is free again — also push the file over BLE, the proven
-          // Recorder → BLE → Zepp App path, kept for its own sake.
-          setTimeout(() => this.pushToPhone(), 800)
-        })
+    },
+
+    onUploaded(entry) {
+      try {
+        rmSync({ path: entry.rel })
+      } catch (e) {
+        // best-effort — a stale file is picked up by scanLeftovers next time
+      }
+      this.dropEntry(entry)
+      if (entry.fresh && !this.blePushed) {
+        this.blePushed = true
+        setTimeout(() => this.pushToPhone(entry.uri), 800)
+      }
+      this.setStatus(`Uploaded ✓${this.pending()}`)
+      this.pumpQueue()
+    },
+
+    onUploadFailed(entry, reason) {
+      entry.attempts = (entry.attempts || 0) + 1
+      this.setStatus(`Upload failed (${reason}) — retry ${entry.attempts}${this.pending()}`)
+      const delay = Math.min(RETRY_MAX_MS, RETRY_STEP_MS * entry.attempts)
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer)
+      }
+      this.retryTimer = setTimeout(() => this.pumpQueue(), delay)
     },
 
     // zml 0.0.43's this.sendFile() targets the old TransferFile shape
     // (instance.outbox.enqueueFile) and fails here, so drive
-    // @zos/ble/TransferFile directly. Fire-and-forget.
-    pushToPhone() {
+    // @zos/ble/TransferFile directly. Fire-and-forget, once per session.
+    pushToPhone(uri) {
       try {
-        new TransferFile().getOutbox().enqueueFile(this.paths.uri, { type: 'opus' })
+        new TransferFile().getOutbox().enqueueFile(uri, { type: 'opus' })
       } catch (e) {
         // best-effort — the upload is the real delivery
       }
@@ -341,6 +428,9 @@ Page(
       this.stopTimer()
       if (this.stopFallbackTimer) {
         clearTimeout(this.stopFallbackTimer)
+      }
+      if (this.retryTimer) {
+        clearTimeout(this.retryTimer)
       }
       if (this.recorder && this.recording) {
         try {
