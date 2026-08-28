@@ -19,7 +19,7 @@
       "minVersion": "4.0"
     }
   },
-  "permissions": ["ble", "device:os.media"],
+  "permissions": ["ble", "device:os.media", "device:os.mic"],
   "targets": {
     "active-max": {
       "module": {
