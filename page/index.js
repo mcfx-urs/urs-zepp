@@ -11,7 +11,7 @@ const DEVICE_WIDTH = 480
 const COUNTERS = [
   { name: '🍺 Beer Counter', url: 'page/beer' },
   { name: '🧺 Chores', url: 'page/chores' },
-  { name: '🎙️ Audio note (PoC)', url: 'page/audio-note' },
+  { name: '🎙️ Audio note', url: 'page/audio-note' },
 ]
 
 Page({
