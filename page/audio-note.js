@@ -2,8 +2,8 @@ import { createWidget, widget, align, prop } from '@zos/ui'
 import { create, id, codec } from '@zos/media'
 import { queryPermission, requestPermission } from '@zos/app'
 import { setInterval, clearInterval, setTimeout, clearTimeout } from '@zos/timer'
-import { statSync, readFileSync, readdirSync, rmSync } from '@zos/fs'
-import TransferFile from '@zos/ble/TransferFile'
+import { statSync } from '@zos/fs'
+import * as display from '@zos/display'
 import { BasePage } from '@zeppos/zml/base-page'
 
 const DEVICE_WIDTH = 480
@@ -13,42 +13,27 @@ const DEVICE_WIDTH = 480
 const MIC_PERMISSION = 'device:os.mic'
 const PERMISSION_GRANTED = 2
 
-// Record a note with @zos/media and get it to urs-android. The recording is
-// also pushed to the phone once with @zos/ble file transfer (proves the
-// Recorder → BLE → Zepp App link), but the delivery that actually persists
-// it is a base64 upload over httpRequest to urs-android's loopback relay —
-// the same relay path the beer action uses — because the Zepp companion
-// service has no API to read a transferred file's bytes.
-const RELAY_BASE_URL = 'http://127.0.0.1:8787'
-const AUDIO_NOTE_ENDPOINT = `${RELAY_BASE_URL}/api/watch/audio-note`
-// Must match WATCH_RELAY_TOKEN in urs-android's WatchRelayToken.kt exactly.
-const RELAY_TOKEN = '33d248e9de3f6cd180d35718ca7d8464145a5dc3368535cc'
-
-// Provisional safety valve, not a recording-length limit: base64 rides zml's
-// BLE messaging and a very large string risks the watch's JS heap. Raise or
-// remove once longer recordings have been tested.
-const MAX_UPLOAD_BYTES = 512 * 1024
-
-// Upload retry: linear backoff, capped, for as long as the screen is open.
-const RETRY_STEP_MS = 5000
-const RETRY_MAX_MS = 60000
-
+// This screen only records: it writes note-<ts>.opus to the data root and
+// stops there. Getting the file to urs-android is page/audio-files' job, so
+// a slow or failing upload can never block or delay a recording.
 const BUTTON_IDLE = { normal_color: 0x1e88e5, press_color: 0x155fa0, text: 'Record' }
 const BUTTON_REC = { normal_color: 0xe53935, press_color: 0xb71c1c, text: 'Stop' }
 
 // After the STOP event the encoder may still be flushing — poll the file
 // size and only act on it once it is non-zero.
 const FILE_POLL_MS = 400
-const FILE_POLL_MAX = 15
+const FILE_POLL_MAX = 20
 // The STOP event is not guaranteed to fire — poll anyway after this long.
 const STOP_FALLBACK_MS = 1500
 
-const NOTE_FILE = /^note-\d+\.opus$/
+// Keep the screen awake while recording: a display timeout suspends the
+// page, which freezes the elapsed timer and can cut the recording short.
+const SCREEN_HOLD_MS = 10 * 60 * 1000
 
-// The recorder (target_file) and TransferFile (enqueueFile) take a data://
-// URI; @zos/fs takes a path relative to /data. Derive both from one id and
-// write to the data root — a data://download/ subdir is not created for us
-// and the recorder then silently writes nothing.
+// The recorder (target_file) takes a data:// URI; @zos/fs takes a path
+// relative to /data. Derive both from one id and write to the data root —
+// a data://download/ subdir is not created for us and the recorder then
+// silently writes nothing.
 function makePaths() {
   const rel = `note-${Date.now()}.opus`
   return { rel, uri: `data://${rel}` }
@@ -68,22 +53,6 @@ function fileSize(rel) {
   return -1
 }
 
-const B64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
-
-function base64FromBytes(bytes) {
-  let out = ''
-  for (let i = 0; i < bytes.length; i += 3) {
-    const b0 = bytes[i]
-    const b1 = i + 1 < bytes.length ? bytes[i + 1] : 0
-    const b2 = i + 2 < bytes.length ? bytes[i + 2] : 0
-    out += B64[b0 >> 2]
-    out += B64[((b0 & 3) << 4) | (b1 >> 4)]
-    out += i + 1 < bytes.length ? B64[((b1 & 15) << 2) | (b2 >> 6)] : '='
-    out += i + 2 < bytes.length ? B64[b2 & 63] : '='
-  }
-  return out
-}
-
 Page(
   BasePage({
     build() {
@@ -94,21 +63,15 @@ Page(
       this.recorder = null
       this.stopFallbackTimer = null
       this.stopHandled = false
-
-      // Pending uploads: { rel, uri, size, attempts }. In-memory only — a
-      // note left unsent when the screen closes is picked up again by
-      // scanLeftovers() next time it opens.
-      this.queue = []
-      this.uploading = false
-      this.retryTimer = null
-      this.blePushed = false
+      this.destroyed = false
+      this.brightHolds = 0
 
       createWidget(widget.TEXT, {
         x: 0,
         y: 50,
         w: DEVICE_WIDTH,
         h: 56,
-        text: 'Audio note',
+        text: 'Record',
         text_size: 32,
         align_h: align.CENTER_H,
         align_v: align.CENTER_V,
@@ -150,8 +113,6 @@ Page(
         text_size: 32,
         click_func: () => this.toggle(),
       })
-
-      this.scanLeftovers()
     },
 
     toggle() {
@@ -230,6 +191,7 @@ Page(
       this.elapsedWidget.text = '0s'
       this.setRecording(true)
       this.startTimer()
+      this.acquireScreen()
       this.setStatus('Recording…')
     },
 
@@ -250,6 +212,7 @@ Page(
         return
       }
       this.stopHandled = true
+      this.releaseScreen()
       if (this.stopFallbackTimer) {
         clearTimeout(this.stopFallbackTimer)
         this.stopFallbackTimer = null
@@ -257,11 +220,12 @@ Page(
       this.waitForFile(1)
     },
 
+    // The encoder keeps flushing after STOP — wait for a non-zero file
+    // before declaring the note saved.
     waitForFile(attempt) {
       const size = fileSize(this.paths.rel)
       if (size > 0) {
-        this.enqueue({ rel: this.paths.rel, uri: this.paths.uri, size, fresh: true })
-        this.pumpQueue()
+        this.setStatus(`Saved ✓ · ${size} B — send it from File manager`)
         return
       }
       if (attempt >= FILE_POLL_MAX) {
@@ -271,129 +235,37 @@ Page(
       setTimeout(() => this.waitForFile(attempt + 1), FILE_POLL_MS)
     },
 
-    // Re-enqueue any note file left on disk from a previous session that
-    // never uploaded (screen closed, crash, relay unreachable).
-    scanLeftovers() {
-      try {
-        const names = readdirSync({ path: '.' }) || []
-        names
-          .filter((n) => NOTE_FILE.test(n))
-          .forEach((rel) => {
-            const size = fileSize(rel)
-            if (size > 0) {
-              this.enqueue({ rel, uri: `data://${rel}`, size, fresh: false })
-            }
-          })
-      } catch (e) {
-        // no leftovers is the normal case
-      }
-      if (this.queue.length) {
-        this.setStatus(`${this.queue.length} note(s) pending`)
-        this.pumpQueue()
+    // Reference-counted screen-awake hold. Only recording takes one here,
+    // but the counter keeps the release path uniform with onDestroy.
+    acquireScreen() {
+      this.brightHolds += 1
+      if (this.brightHolds === 1) {
+        try {
+          display.setPageBrightTime({ brightTime: SCREEN_HOLD_MS })
+        } catch (e) {
+          // display API unavailable — recording still works, just not past
+          // the screen timeout
+        }
       }
     },
 
-    enqueue(entry) {
-      if (this.queue.some((e) => e.rel === entry.rel)) {
+    releaseScreen(force) {
+      if (force) {
+        this.brightHolds = 0
+      } else if (this.brightHolds > 0) {
+        this.brightHolds -= 1
+      }
+      if (this.brightHolds > 0) {
         return
       }
-      entry.attempts = 0
-      this.queue.push(entry)
-    },
-
-    dropEntry(entry) {
-      this.queue = this.queue.filter((e) => e.rel !== entry.rel)
-    },
-
-    pending() {
-      return this.queue.length ? ` (${this.queue.length} pending)` : ''
-    },
-
-    // One upload at a time; a concurrent BLE file transfer starves the zml
-    // messaging handshake ("shake timeout"), so the BLE push waits too.
-    pumpQueue() {
-      if (this.uploading || this.queue.length === 0) {
-        return
-      }
-      const entry = this.queue[0]
-
-      if (entry.size > MAX_UPLOAD_BYTES) {
-        this.dropEntry(entry)
-        this.setStatus(`Note too long to upload — kept on watch${this.pending()}`)
-        this.pumpQueue()
-        return
-      }
-
-      let b64
       try {
-        b64 = base64FromBytes(new Uint8Array(readFileSync({ path: entry.rel })))
+        if (typeof display.resetPageBrightTime === 'function') {
+          display.resetPageBrightTime()
+        } else {
+          display.setPageBrightTime({ brightTime: 0 })
+        }
       } catch (e) {
-        // File vanished — nothing to send.
-        this.dropEntry(entry)
-        this.pumpQueue()
-        return
-      }
-
-      this.uploading = true
-      this.setStatus(`Uploading ${entry.size}B…${this.pending()}`)
-      this.httpRequest({
-        method: 'POST',
-        url: AUDIO_NOTE_ENDPOINT,
-        headers: {
-          'x-relay-token': RELAY_TOKEN,
-          'content-type': 'text/plain',
-          'x-audio-encoding': 'base64',
-        },
-        body: b64,
-      })
-        .then((res) => {
-          this.uploading = false
-          // httpRequest resolves for any completed response, not just 2xx.
-          if (res && res.status >= 200 && res.status < 300) {
-            this.onUploaded(entry)
-          } else {
-            this.onUploadFailed(entry, `status ${res && res.status}`)
-          }
-        })
-        .catch((e) => {
-          this.uploading = false
-          this.onUploadFailed(entry, (e && e.message) || `${e}`)
-        })
-    },
-
-    onUploaded(entry) {
-      try {
-        rmSync({ path: entry.rel })
-      } catch (e) {
-        // best-effort — a stale file is picked up by scanLeftovers next time
-      }
-      this.dropEntry(entry)
-      if (entry.fresh && !this.blePushed) {
-        this.blePushed = true
-        setTimeout(() => this.pushToPhone(entry.uri), 800)
-      }
-      this.setStatus(`Uploaded ✓${this.pending()}`)
-      this.pumpQueue()
-    },
-
-    onUploadFailed(entry, reason) {
-      entry.attempts = (entry.attempts || 0) + 1
-      this.setStatus(`Upload failed (${reason}) — retry ${entry.attempts}${this.pending()}`)
-      const delay = Math.min(RETRY_MAX_MS, RETRY_STEP_MS * entry.attempts)
-      if (this.retryTimer) {
-        clearTimeout(this.retryTimer)
-      }
-      this.retryTimer = setTimeout(() => this.pumpQueue(), delay)
-    },
-
-    // zml 0.0.43's this.sendFile() targets the old TransferFile shape
-    // (instance.outbox.enqueueFile) and fails here, so drive
-    // @zos/ble/TransferFile directly. Fire-and-forget, once per session.
-    pushToPhone(uri) {
-      try {
-        new TransferFile().getOutbox().enqueueFile(uri, { type: 'opus' })
-      } catch (e) {
-        // best-effort — the upload is the real delivery
+        // best-effort
       }
     },
 
@@ -406,6 +278,9 @@ Page(
     },
 
     setStatus(text) {
+      if (this.destroyed) {
+        return
+      }
       this.statusWidget.text = text
     },
 
@@ -424,13 +299,21 @@ Page(
       }
     },
 
+    // Screen-off or app backgrounded mid-recording: stop and flush now so
+    // the note is saved to disk, instead of risking a hard kill that leaves
+    // a partial file. Distinct from the user tapping Stop.
+    onPause() {
+      if (this.recording) {
+        this.stopRecording()
+      }
+    },
+
     onDestroy() {
+      this.destroyed = true
       this.stopTimer()
+      this.releaseScreen(true)
       if (this.stopFallbackTimer) {
         clearTimeout(this.stopFallbackTimer)
-      }
-      if (this.retryTimer) {
-        clearTimeout(this.retryTimer)
       }
       if (this.recorder && this.recording) {
         try {

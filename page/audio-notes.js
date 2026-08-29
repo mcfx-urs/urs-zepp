@@ -3,15 +3,12 @@ import { push } from '@zos/router'
 
 const DEVICE_WIDTH = 480
 
-// Top-level menu. Each entry opens its own submenu; further counters get
-// appended here as they are built. The leading emoji stands in for a real
-// icon (GitHub issue #7) — SCROLL_LIST's image_view needs a bundled bitmap
-// per icon, and the system font already renders these glyphs, so no new
-// asset pipeline is needed for a first pass.
-const COUNTERS = [
-  { name: '🍺 Beer Counter', url: 'page/beer' },
-  { name: '🧺 Chores', url: 'page/chores' },
-  { name: '🎙️ Audio note', url: 'page/audio-notes' },
+// Audio notes split into two screens so a stalled or slow upload can never
+// block recording: page/audio-note only records (file to disk), page/
+// audio-files sends the saved files to the phone and clears them.
+const ENTRIES = [
+  { name: '⏺ Record', url: 'page/audio-note' },
+  { name: '📁 File manager', url: 'page/audio-files' },
 ]
 
 Page({
@@ -21,7 +18,7 @@ Page({
       y: 40,
       w: DEVICE_WIDTH,
       h: 60,
-      text: 'URS',
+      text: 'Audio note',
       text_size: 40,
       align_h: align.CENTER_H,
       align_v: align.CENTER_V,
@@ -55,13 +52,12 @@ Page({
         },
       ],
       item_config_count: 1,
-      data_array: COUNTERS,
-      data_count: COUNTERS.length,
-      data_type_config: [{ start: 0, end: COUNTERS.length - 1, type_id: 1 }],
+      data_array: ENTRIES,
+      data_count: ENTRIES.length,
+      data_type_config: [{ start: 0, end: ENTRIES.length - 1, type_id: 1 }],
       data_type_config_count: 1,
       item_click_func: (list, index) => {
-        const entry = COUNTERS[index]
-        push({ url: entry.url, params: entry.params })
+        push({ url: ENTRIES[index].url })
       },
     })
   },
