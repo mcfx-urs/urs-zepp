@@ -10,16 +10,19 @@ const DEVICE_WIDTH = 480
 // service does the real fetch, so 127.0.0.1 reaches urs-android without the
 // backend tunnel. Must match WATCH_RELAY_TOKEN in urs-android exactly.
 const RELAY_BASE_URL = 'http://127.0.0.1:8787'
-const AUDIO_NOTE_ENDPOINT = `${RELAY_BASE_URL}/api/watch/audio-note`
+const CHUNK_ENDPOINT = `${RELAY_BASE_URL}/api/watch/audio-note-chunk`
 const RELAY_TOKEN = '0'
 
-const NOTE_FILE = /^note-\d+\.opus$/
+const NOTE_FILE = /^note-(\d+)\.opus$/
 
-// The base64 body rides zml's BLE messaging (~5 KB/s measured) and, beyond
-// roughly 40 KB encoded, the transfer aborts mid-stream ("send message
-// error"). Cap the raw size to the range that transfers reliably; larger
-// notes stay on the watch until the file-transfer upload path lands.
-const MAX_UPLOAD_BYTES = 32 * 1024
+// zml BLE messaging (~5 KB/s measured) aborts a body mid-stream ("send
+// message error") beyond roughly 40 KB base64. 24 KB raw per chunk
+// (~32 KB base64) stays inside the range that transfers reliably, so every
+// note — regardless of length — goes out as one or more chunks to the
+// relay's reassembly endpoint. No per-note length limit; this sanity cap
+// only guards against a runaway recording.
+const CHUNK_RAW_BYTES = 24 * 1024
+const SANE_MAX_BYTES = 2 * 1024 * 1024
 
 // Backstop for an upload whose httpRequest never settles.
 const UPLOAD_WATCHDOG_MS = 90000
@@ -66,8 +69,9 @@ function listNotes() {
     return []
   }
   return names
-    .filter((n) => NOTE_FILE.test(n))
-    .map((rel) => {
+    .map((rel) => ({ rel, match: NOTE_FILE.exec(rel) }))
+    .filter((f) => f.match)
+    .map(({ rel, match }) => {
       let size = -1
       try {
         const st = statSync({ path: rel })
@@ -77,7 +81,9 @@ function listNotes() {
       } catch (e) {
         // skip unreadable
       }
-      return { rel, size }
+      // The filename's timestamp is set at recording start (page/audio-note.js
+      // makePaths()) — the recording's actual start time, not upload time.
+      return { rel, size, recordedAtMillis: match[1] }
     })
     .filter((f) => f.size > 0)
     .sort((a, b) => (a.rel < b.rel ? -1 : 1))
@@ -212,9 +218,8 @@ Page(
         return
       }
       const note = this.notes[index]
-      this.setStatus(`Sending ${index + 1}/${this.notes.length}…`)
 
-      if (note.size > MAX_UPLOAD_BYTES) {
+      if (note.size > SANE_MAX_BYTES) {
         this.skipped += 1
         this.uploadNext(index + 1)
         return
@@ -234,15 +239,28 @@ Page(
         return
       }
 
-      base64FromBytes(bytes, (b64) => {
+      const uploadId = note.rel.replace(/\.opus$/, '')
+      const chunkCount = Math.max(1, Math.ceil(bytes.length / CHUNK_RAW_BYTES))
+      this.sendChunk(note, bytes, uploadId, chunkCount, 0, index)
+    },
+
+    sendChunk(note, bytes, uploadId, chunkCount, chunkIndex, index) {
+      this.setStatus(
+        chunkCount > 1
+          ? `Sending ${index + 1}/${this.notes.length} (${chunkIndex + 1}/${chunkCount})…`
+          : `Sending ${index + 1}/${this.notes.length}…`,
+      )
+      const start = chunkIndex * CHUNK_RAW_BYTES
+      const end = Math.min(bytes.length, start + CHUNK_RAW_BYTES)
+      base64FromBytes(bytes.subarray(start, end), (b64) => {
         if (this.destroyed) {
           return
         }
-        this.sendOne(note, b64, index)
+        this.postChunk(note, bytes, uploadId, chunkCount, chunkIndex, b64, index)
       })
     },
 
-    sendOne(note, b64, index) {
+    postChunk(note, bytes, uploadId, chunkCount, chunkIndex, b64, index) {
       let settled = false
       const done = (fn) => {
         if (settled) {
@@ -262,11 +280,15 @@ Page(
 
       this.httpRequest({
         method: 'POST',
-        url: AUDIO_NOTE_ENDPOINT,
+        url: CHUNK_ENDPOINT,
         headers: {
           'x-relay-token': RELAY_TOKEN,
           'content-type': 'text/plain',
           'x-audio-encoding': 'base64',
+          'x-upload-id': uploadId,
+          'x-chunk-index': String(chunkIndex),
+          'x-chunk-count': String(chunkCount),
+          'x-recorded-at': note.recordedAtMillis,
         },
         body: b64,
       })
@@ -274,12 +296,17 @@ Page(
           done(() => {
             // httpRequest resolves for any completed response, not just 2xx.
             if (res && res.status >= 200 && res.status < 300) {
-              this.sent += 1
-              this.removeFile(note.rel)
+              if (chunkIndex + 1 >= chunkCount) {
+                this.sent += 1
+                this.removeFile(note.rel)
+                this.uploadNext(index + 1)
+              } else {
+                this.sendChunk(note, bytes, uploadId, chunkCount, chunkIndex + 1, index)
+              }
             } else {
               this.failed += 1
+              this.uploadNext(index + 1)
             }
-            this.uploadNext(index + 1)
           })
         })
         .catch(() => {
