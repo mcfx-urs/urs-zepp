@@ -30,6 +30,15 @@ const STOP_FALLBACK_MS = 1500
 // page, which freezes the elapsed timer and can cut the recording short.
 const SCREEN_HOLD_MS = 10 * 60 * 1000
 
+// Recording can't survive a real screen-off (onPause stops it — see below),
+// so instead of dimming the display we keep it lit but reduce it to a thin
+// faded ring at the screen edge after a few seconds of no interaction.
+// Tapping anywhere restores the full UI and re-arms this timer.
+const RING_DELAY_MS = 2000
+const RING_LINE_WIDTH = 7
+const RING_RADIUS = DEVICE_WIDTH / 2 - RING_LINE_WIDTH / 2
+const RING_COLOR = 0x661a1a
+
 // The recorder (target_file) takes a data:// URI; @zos/fs takes a path
 // relative to /data. Derive both from one id and write to the data root —
 // a data://download/ subdir is not created for us and the recorder then
@@ -65,8 +74,10 @@ Page(
       this.stopHandled = false
       this.destroyed = false
       this.brightHolds = 0
+      this.ringMode = false
+      this.ringTimer = null
 
-      createWidget(widget.TEXT, {
+      this.titleWidget = createWidget(widget.TEXT, {
         x: 0,
         y: 50,
         w: DEVICE_WIDTH,
@@ -113,6 +124,31 @@ Page(
         text_size: 32,
         click_func: () => this.toggle(),
       })
+
+      // Ring mode: created last so both sit above the widgets above and can
+      // hide them from view. Hidden until enterRingMode() shows them.
+      this.ringCatcher = createWidget(widget.FILL_RECT, {
+        x: 0,
+        y: 0,
+        w: DEVICE_WIDTH,
+        h: DEVICE_WIDTH,
+        color: 0x000000,
+        click_down: () => this.wakeFromRing(),
+      })
+      this.ringArc = createWidget(widget.ARC, {
+        x: 0,
+        y: 0,
+        w: DEVICE_WIDTH,
+        h: DEVICE_WIDTH,
+        radius: RING_RADIUS,
+        start_angle: 0,
+        end_angle: 360,
+        color: RING_COLOR,
+        line_width: RING_LINE_WIDTH,
+        click_down: () => this.wakeFromRing(),
+      })
+      this.ringCatcher.setProperty(prop.VISIBLE, false)
+      this.ringArc.setProperty(prop.VISIBLE, false)
     },
 
     toggle() {
@@ -192,10 +228,13 @@ Page(
       this.setRecording(true)
       this.startTimer()
       this.acquireScreen()
+      this.armRingTimer()
       this.setStatus('Recording…')
     },
 
     stopRecording() {
+      this.clearRingTimer()
+      this.exitRingMode()
       this.stopTimer()
       this.setRecording(false)
       this.setStatus('Stopping…')
@@ -233,6 +272,60 @@ Page(
         return
       }
       setTimeout(() => this.waitForFile(attempt + 1), FILE_POLL_MS)
+    },
+
+    // --- ring mode -------------------------------------------------------
+
+    armRingTimer() {
+      this.clearRingTimer()
+      if (!this.recording) {
+        return
+      }
+      this.ringTimer = setTimeout(() => this.enterRingMode(), RING_DELAY_MS)
+    },
+
+    clearRingTimer() {
+      if (this.ringTimer) {
+        clearTimeout(this.ringTimer)
+        this.ringTimer = null
+      }
+    },
+
+    enterRingMode() {
+      if (this.ringMode || !this.recording) {
+        return
+      }
+      this.ringMode = true
+      this.setFullUiVisible(false)
+      this.ringCatcher.setProperty(prop.VISIBLE, true)
+      this.ringArc.setProperty(prop.VISIBLE, true)
+    },
+
+    exitRingMode() {
+      if (!this.ringMode) {
+        return
+      }
+      this.ringMode = false
+      this.ringCatcher.setProperty(prop.VISIBLE, false)
+      this.ringArc.setProperty(prop.VISIBLE, false)
+      this.setFullUiVisible(true)
+    },
+
+    // Tap anywhere during ring mode: show the full UI again and re-arm the
+    // timer so it collapses back to the ring after another idle period.
+    wakeFromRing() {
+      if (!this.ringMode) {
+        return
+      }
+      this.exitRingMode()
+      this.armRingTimer()
+    },
+
+    setFullUiVisible(visible) {
+      this.titleWidget.setProperty(prop.VISIBLE, visible)
+      this.statusWidget.setProperty(prop.VISIBLE, visible)
+      this.elapsedWidget.setProperty(prop.VISIBLE, visible)
+      this.button.setProperty(prop.VISIBLE, visible)
     },
 
     // Reference-counted screen-awake hold. Only recording takes one here,
@@ -311,6 +404,7 @@ Page(
     onDestroy() {
       this.destroyed = true
       this.stopTimer()
+      this.clearRingTimer()
       this.releaseScreen(true)
       if (this.stopFallbackTimer) {
         clearTimeout(this.stopFallbackTimer)
