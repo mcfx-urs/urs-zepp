@@ -6,10 +6,16 @@ the Amazfit Active Max), companion to [urs-android](https://github.com/3lefeint/
 
 ## Features
 
-A two-level menu: the top-level `URS` screen lists the available counters,
-and each opens a submenu of logging actions. The first counter, `Beer
-Counter`, logs a beer to URS (`+330ml` / `+500ml`) without reaching for the
-phone.
+A two-level menu: the top-level `URS` screen lists the available actions,
+each opening its own submenu.
+
+- **🍺 Beer Counter** — log a beer (`+330ml` / `+500ml`) without reaching
+  for the phone.
+- **🧺 Chores** — log an event for any of the account's real chore types,
+  synced from `urs-android` instead of a hardcoded list.
+- **🎙️ Audio note** — record a voice note on the watch; a retryable,
+  chunked upload queues it to the backend, with a small on-watch file
+  manager to review or delete pending ones.
 
 ## Architecture
 
