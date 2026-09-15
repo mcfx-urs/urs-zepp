@@ -1,7 +1,7 @@
 # urs-zepp
 
 A [Zepp OS](https://docs.zepp.com/) mini-app for Amazfit watches (built for
-the Amazfit Active Max), companion to [urs-android](https://github.com/3lefeint/urs-android)
+the Amazfit Active Max), companion to [urs-android](https://github.com/mcfx-urs/urs-android)
 — quick logging actions from the wrist for the URS household-tracking app.
 
 ## Features
