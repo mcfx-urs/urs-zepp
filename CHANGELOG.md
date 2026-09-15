@@ -5,6 +5,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added
+
+- LICENSE (MIT).
+
 ### Changed
 
 - Watch-relay shared token is now centralized in `utils/relay-token.js` and masked out of git via a clean/smudge filter, instead of being duplicated as a literal in four page files.
