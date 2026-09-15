@@ -1,5 +1,6 @@
 import { createWidget, widget, align, prop } from '@zos/ui'
 import { BasePage } from '@zeppos/zml/base-page'
+import { RELAY_TOKEN } from '../utils/relay-token'
 
 const DEVICE_WIDTH = 480
 
@@ -9,8 +10,6 @@ const DEVICE_WIDTH = 480
 // backend's WireGuard tunnel at all.
 const RELAY_BASE_URL = 'http://127.0.0.1:8787'
 const BEER_FILL_ENDPOINT = `${RELAY_BASE_URL}/api/watch/beer-fill`
-// Must match WATCH_RELAY_TOKEN in urs-android's WatchRelayToken.kt exactly.
-const RELAY_TOKEN = '0'
 
 const VOLUMES_ML = [330, 500]
 

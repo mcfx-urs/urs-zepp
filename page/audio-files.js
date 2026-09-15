@@ -3,15 +3,15 @@ import { setTimeout, clearTimeout } from '@zos/timer'
 import { readdirSync, readFileSync, statSync, rmSync } from '@zos/fs'
 import * as display from '@zos/display'
 import { BasePage } from '@zeppos/zml/base-page'
+import { RELAY_TOKEN } from '../utils/relay-token'
 
 const DEVICE_WIDTH = 480
 
 // Same loopback relay the beer/chore actions use — the Zepp App side
 // service does the real fetch, so 127.0.0.1 reaches urs-android without the
-// backend tunnel. Must match WATCH_RELAY_TOKEN in urs-android exactly.
+// backend tunnel.
 const RELAY_BASE_URL = 'http://127.0.0.1:8787'
 const CHUNK_ENDPOINT = `${RELAY_BASE_URL}/api/watch/audio-note-chunk`
-const RELAY_TOKEN = '0'
 
 const NOTE_FILE = /^note-(\d+)\.opus$/
 

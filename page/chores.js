@@ -1,6 +1,7 @@
 import { createWidget, widget, align, deleteWidget } from '@zos/ui'
 import { push } from '@zos/router'
 import { BasePage } from '@zeppos/zml/base-page'
+import { RELAY_TOKEN } from '../utils/relay-token'
 
 const DEVICE_WIDTH = 480
 
@@ -8,8 +9,6 @@ const DEVICE_WIDTH = 480
 // real fetch, so 127.0.0.1 reaches urs-android without the backend tunnel.
 const RELAY_BASE_URL = 'http://127.0.0.1:8787'
 const CHORE_TYPES_ENDPOINT = `${RELAY_BASE_URL}/api/watch/chore-types`
-// Must match WATCH_RELAY_TOKEN in urs-android's WatchRelayToken.kt exactly.
-const RELAY_TOKEN = '0'
 
 // One row per chore type; the relay returns [{ typeId, name }, …].
 const LIST_ITEM_CONFIG = [
